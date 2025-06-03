@@ -33,8 +33,8 @@ def main(args, loglevel):
     generator.process_programming_functions()
     contents = generator.get_xml_string()
     if args.filename:
-        print("Writing to file '{0:s}'".format(args.filename))
-        with open(args.filename, "w") as xmlfile:
+        print(f"Writing to file '{args.filename:s}'")
+        with open(args.filename, "w", encoding='utf-8') as xmlfile:
             xmlfile.write(contents)
     else:
         print("Config generator output:")

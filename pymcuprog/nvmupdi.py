@@ -66,6 +66,11 @@ class NvmAccessProviderCmsisDapUpdi(NvmAccessProviderCmsisDapAvr):
         """
         self.logger.debug("UPDI-specific initialiser")
 
+        if 'chip-erase-locked-device' in self.options and self.options['chip-erase-locked-device']:
+            self.logger.info("Activating chip-erase key entry mechanism")
+            self.avr.protocol.set_byte(Avr8Protocol.AVR8_CTXT_OPTIONS,
+                                       Avr8Protocol.AVR8_OPT_CHIP_ERASE_TO_ENTER, 1)
+
         try:
             self.avr.activate_physical(user_interaction_callback=user_interaction_callback)
         except Jtagice3ResponseError as error:
@@ -78,10 +83,6 @@ class NvmAccessProviderCmsisDapUpdi(NvmAccessProviderCmsisDapAvr):
                 raise
 
         self.avr.sib_read()
-        if 'chip-erase-locked-device' in self.options and self.options['chip-erase-locked-device']:
-            self.logger.info("Activating chip-erase key entry mechanism")
-            self.avr.protocol.set_byte(Avr8Protocol.AVR8_CTXT_OPTIONS,
-                                       Avr8Protocol.AVR8_OPT_CHIP_ERASE_TO_ENTER, 1)
 
         # There is a lot that can go wrong here, but a few things can be accurately determined:
         try:
@@ -94,7 +95,7 @@ class NvmAccessProviderCmsisDapUpdi(NvmAccessProviderCmsisDapAvr):
                     # log a warning because a) the previous log message is a warning and this should match and
                     # b) this is a special function flag which only applies to user row
                     # (but at this point we can't police that)
-                    self.logger.warning("Proceding to write user row on a locked device...")
+                    self.logger.warning("Proceeding to write user row on a locked device...")
                     # return before raising exception - this causes the access to attempt to continue
                     # when using the special option flag for writing user row on locked devices.
                     return
@@ -102,6 +103,8 @@ class NvmAccessProviderCmsisDapUpdi(NvmAccessProviderCmsisDapAvr):
             # Other exceptions can just propagate
             raise
         if "chip-erase-locked-device" in self.options:
+            if self.device_info.get(DeviceInfoKeysAvr.HV_IMPLEMENTATION) == 3:
+                self.logger.warning("*** Chip erase with UPDI handshake complete.  For best results toggle power now ***")
             self.logger.info("Key chip-erase complete")
 
     def stop(self):

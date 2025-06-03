@@ -210,19 +210,18 @@ sessionconfig = SessionConfig("atmega4808")
 from pymcuprog.toolconnection import ToolUsbHidConnection
 transport = ToolUsbHidConnection()
 
-# Instantiate backend
+# Instantiate backend, connect to tool using transport, start session using sessionconfig
+#
+# The Backend constructor arguments `transport' and `sessionconfig' are optional,
+# setting them will cause backend.connect_to_tool() and backend.start_session() respectively
+# to be called during construction. Connection and session will be automatically
+# torn down when backend object goes out of scope at end of with-block.
+#
 from pymcuprog.backend import Backend
-backend = Backend()
-
-# Connect to tool using transport
-backend.connect_to_tool(transport)
-
-# Start the session
-backend.start_session(sessionconfig)
-
-# Read the target device_id
-device_id = backend.read_device_id()
-print ("Device ID is {0:06X}".format(int.from_bytes(device_id, byteorder="little")))
+with Backend(transport, sessionconfig) as backend:
+    # Read the target device_id
+    device_id = backend.read_device_id()
+    print("Device ID is {0:06X}".format(int.from_bytes(device_id, byteorder="little")))
 ```
 
 ## Logging

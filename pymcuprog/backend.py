@@ -72,7 +72,11 @@ class Backend(object):
     """
     API_VERSION = '2.0'
 
-    def __init__(self):
+    def __init__(self, toolconnection=None, sessionconfig=None):
+        """
+        :param toolconnection: ToolConnection instance to connect to, or None to not connect yet
+        :param sessionconfig: Session configuration to use, or None to not start a session
+        """
         # Hook onto logger
         self.logger = getLogger(__name__)
         self.transport = None
@@ -81,6 +85,10 @@ class Backend(object):
         self.programmer = None
         self.device_memory_info = None
         self.housekeeper = None
+        if toolconnection:
+            self.connect_to_tool(toolconnection)
+            if sessionconfig:
+                self.start_session(sessionconfig)
 
     def get_api_version(self):
         """
@@ -699,3 +707,14 @@ class Backend(object):
         """
         if not self.session_active:
             raise PymcuprogSessionError("No programming session active")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exctype, excvalue, exctraceback):
+        """
+        Tear down session and connection at end of with-block.
+        TODO: Should we do anything with exceptions here?
+        """
+        self.end_session()
+        self.disconnect_from_tool()

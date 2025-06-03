@@ -39,6 +39,18 @@ class NvmAccessProviderCmsisDapPic(NvmAccessProviderCmsisDapTool):
         sys.path = [os.path.normpath(packpath)] + sys.path
         sys.path = [os.path.normpath(packpath + "//common")] + sys.path
 
+        # Make sure any previously loaded modules from common devicesupportscripts files are removed from list of
+        # loaded modules to enforce reload of these modules from the new packpath.
+        # This avoids re-use of common files/modules from any previously loaded packpath(s)
+        common_modules = []
+        for key, module in sys.modules.items():
+            pathseparator = os.path.normpath('/')
+            if pathseparator + 'common' + pathseparator in str(module):
+                common_modules.append(key)
+
+        for module in common_modules:
+            sys.modules.pop(module)
+
         # Create driver for scripted debuggers
         self.options['skip_blank_pages'] = True
         self.options['overlapped_usb_access'] = False
@@ -80,7 +92,7 @@ class NvmAccessProviderCmsisDapPic(NvmAccessProviderCmsisDapTool):
         :param numbytes: number of bytes to read
         :return: array of bytes read
         """
-        
+
         mem_name = memory_info[DeviceInfoKeys.NAME]
         offset += memory_info[DeviceMemoryInfoKeys.ADDRESS]
         if mem_name in [MemoryNames.FLASH, MemoryNames.USER_ID, MemoryNames.ICD, MemoryNames.DIA, MemoryNames.DCI]:

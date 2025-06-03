@@ -1,5 +1,23 @@
 # Changelog
+## []
+## [3.19] - June 2025
 
+### Added
+- DSG-1356 API: Implement context management to automatically close session and disconnect tool when Backend object goes out of scope (`with Backend(...) as ...` block)
+- DSG-7379 add support for SAMD21 XPRO
+- DSG-7449 add support for boot-row on AVR EB
+- DSG-7492 add support for dsPIC33AK512MPS506
+
+### Changed
+- DSG-7226 CLI: Accept hex number (0x prefix) in read/write size specifications
+- DSG-7185 Add note in pymcuprog documentation that packpath argument should not end with a (back)slash
+
+### Fixed
+- DSG-6407 pymcuprog fails on reads that are not aligned with USB chunk size (512 bytes)
+- DSG-7438 pymcuprog re-uses common files from previous DSS when starting session for a different device
+- DSG-7448 Exclude build folder from pymcuprog
+- DSG-7469 Chip-erase-locked-device is not passed through early enough to be used
+- DSG-7668 Incorrect SRAM start address in pymcuprog for AVR32SD32
 
 ## [3.17] - March 2024
 

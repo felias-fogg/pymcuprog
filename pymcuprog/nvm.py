@@ -34,7 +34,7 @@ def get_nvm_access_provider(transport, device_info, interface="", packpath=None,
     if not interface and DeviceInfoKeys.INTERFACE in device_info:
         interface = device_info[DeviceInfoKeys.INTERFACE].lower()
 
-    if architecture in ['pic16', 'pic18', 'pic24', 'dspic33']:
+    if architecture in ['pic16', 'pic18', 'pic24', 'dspic33', 'dspic33a']:
         from .nvmpic import NvmAccessProviderCmsisDapPic
         accessprovider = NvmAccessProviderCmsisDapPic(transport, device_info, packpath, options=options)
 

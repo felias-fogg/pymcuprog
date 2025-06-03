@@ -16,6 +16,62 @@ from pymcuprog.pymcuprog_errors import PymcuprogError
 from pymcuprog.deviceinfo.memorynames import MemoryNames
 from pymcuprog.deviceinfo.deviceinfokeys import DeviceMemoryInfoKeys
 
+def make_register(name, value):
+    """Create a register element
+
+    :param name: Name of register
+    :type name: string
+    :param value: Register value
+    :type value: string
+    :return: Register element
+    :rtype: class:`xml.etree.ElementTree.Element`
+    """
+
+    reg = ETree.Element("register")
+    reg.attrib["name"] = name
+    reg.attrib["value"] = value
+    return reg
+
+def add_register(element, name, value):
+    """
+    Add a register into the XML element
+
+    :param element: XML element
+    :type element: class:`xml.etree.ElementTree.Element`
+    :param name: <register name="xxx">
+    :type name: string
+    :param value: <register value="xxx">
+    :type value: string
+    """
+
+    element.append(make_register(name, value))
+
+def add_data(element, name, value):
+    """
+    Add a data type into the XML element
+
+    :param element: XML element
+    :type element: class:`xml.etree.ElementTree.Element`
+    :param name: <data type="xxx">
+    :type name: string
+    :param value: value
+    :type value: string
+    """
+    data = ETree.Element("data")
+    data.attrib["type"] = name
+    data.text = value
+    element.append(data)
+
+def add_comment(element, comment):
+    """Add comment into the XML element
+
+    :param element: XML element
+    :type element: class:`xml.etree.ElementTree.Element`
+    :param comment: Comment string
+    :type comment: string
+    """
+    comment_element = ETree.Comment(comment)
+    element.append(comment_element)
 
 class ConfigGenerator(object):
     """
@@ -141,8 +197,7 @@ class ConfigGenerator(object):
         """
         xml_blob = ETree.Element("blob")
         # Add source as comment
-        comment = ETree.Comment("Source code used to generate this blob:\n{}".format(self.source))
-        xml_blob.append(comment)
+        add_comment(xml_blob, "Source code used to generate this blob:\n{}".format(self.source))
 
         # Add LIST token: <token>LIST</token>
         token = ETree.Element("token")
@@ -156,30 +211,6 @@ class ConfigGenerator(object):
             xml_blob.append(contents[entry])
         return xml_blob
 
-    def _add_register(self, name, value):
-        """
-        Shortcut to add a register into the XML
-
-        :param name: <register name="xxx">
-        :param value: <register value="xxx">
-        """
-        reg = ETree.Element("register")
-        reg.attrib["name"] = name
-        reg.attrib["value"] = value
-        return reg
-
-    def _add_data(self, name, value):
-        """
-        Shortcut to add a data type into the XML
-
-        :param name: <data type="xxx">
-        :param value: value
-        """
-        data = ETree.Element("data")
-        data.attrib["type"] = name
-        data.text = value
-        return data
-
     def populate_device_config_template(self):
         """
         Template for header of device config
@@ -187,28 +218,27 @@ class ConfigGenerator(object):
         # Construct the root
         deviceconf = ETree.Element("deviceconf")
         deviceconf.attrib["name"] = self.pic.device_name.upper()
-        comment = ETree.Comment("device config for {} generated {}"
-                                .format(self.pic.device_name, datetime.now().strftime("%Y.%m.%d, %H:%M:%S")))
-        deviceconf.append(comment)
+        add_comment(deviceconf, "device config for {} generated {}"
+                    .format(self.pic.device_name, datetime.now().strftime("%Y.%m.%d, %H:%M:%S")))
 
         # Construct basic version info:
         # These values are hardcoded, and thus need to be updated when the spec updates :/
         # It would be nice to fetch them from somewhere...
-        deviceconf.append(self._add_register("DEVICE_CONFIG_MAJOR", "1"))
-        deviceconf.append(self._add_register("DEVICE_CONFIG_MINOR", "10"))
-        deviceconf.append(self._add_register("DEVICE_CONFIG_BUILD", "4"))
+        add_register(deviceconf, "DEVICE_CONFIG_MAJOR", "1")
+        add_register(deviceconf, "DEVICE_CONFIG_MINOR", "10")
+        add_register(deviceconf, "DEVICE_CONFIG_BUILD", "4")
         # Not used yet:
-        deviceconf.append(self._add_register("CONTENT_LENGTH", "0"))
-        deviceconf.append(self._add_register("CONTENT_CHECKSUM", "0"))
+        add_register(deviceconf, "CONTENT_LENGTH", "0")
+        add_register(deviceconf, "CONTENT_CHECKSUM", "0")
         # Default to start at 0
-        deviceconf.append(self._add_register("INSTANCE", "0"))
+        add_register(deviceconf, "INSTANCE", "0")
         # PIC primitive sequences are always interface type 4
-        deviceconf.append(self._add_register("INTERFACE_TYPE", "0x04"))
+        add_register(deviceconf, "INTERFACE_TYPE", "0x04")
         # Variant: PIC16 is 0, PIC18 is 1
         if "PIC16" in self.pic.device_name.upper():
-            deviceconf.append(self._add_register("DEVICE_VARIANT", "0x00"))
+            add_register(deviceconf, "DEVICE_VARIANT", "0x00")
         elif "PIC18" in self.pic.device_name.upper():
-            deviceconf.append(self._add_register("DEVICE_VARIANT", "0x01"))
+            add_register(deviceconf, "DEVICE_VARIANT", "0x01")
         else:
             raise Exception("Unknown device variant - are you sure this is a PIC?")
 
@@ -252,24 +282,24 @@ class ConfigGenerator(object):
         device_info = self.device_memory_info.device
 
         # Add fields
-        entry.append(self._add_data("PIC_FLASH_BASE_W", "0x{0:08X}".format(flash_info['address']//2)))
-        entry.append(self._add_data("PIC_EEPROM_BASE_W", "0x{0:08X}".format(eeprom_base_w)))
-        entry.append(self._add_data("PIC_USER_ID_BASE_W", "0x{0:08X}".format(user_id_info['address']//2)))
-        entry.append(self._add_data("PIC_CONFIG_BASE_W", "0x{0:08X}".format(config_word_info['address']//2)))
-        entry.append(self._add_data("PIC_FLASH_SIZE_W", "0x{0:08X}".format((flash_info['size']+1)//2)))
-        entry.append(self._add_data("PIC_EEPROM_SIZE_B", "0x{0:04X}".format(eeprom_size_b)))
-        entry.append(self._add_data("PIC_USER_ID_SIZE_W", "{}".format((user_id_info['size']+1)//2)))
-        entry.append(self._add_data("PIC_CONFIG_SIZE_W", "{}".format((config_word_info['size']+1)//2)))
-        entry.append(self._add_data("PIC_FLASH_WRITE_BLOCK_B", "{}".format(flash_info['page_size'])))
-        entry.append(self._add_data("PIC_EEPROM_WRITE_BLOCK_B", "{}".format(eeprom_write_block_b)))
-        entry.append(self._add_data("PIC_USER_ID_WRITE_BLOCK_B", "{}".format(user_id_info['write_size'])))
-        entry.append(self._add_data("PIC_CONFIG_WRITE_BLOCK_B", "{}".format(config_word_info['write_size'])))
-        entry.append(self._add_data("PIC_DEVICE_ID", "0x{0:04X}".format(device_info['device_id'])))
-        comment = ETree.Comment("Mask for config bytes. Bit n: 0->allow config byte offset n write, 1->block config byte offset n write.")
-        entry.append(comment)
+        add_data(entry, "PIC_FLASH_BASE_W", "0x{0:08X}".format(flash_info['address']//2))
+        add_data(entry, "PIC_EEPROM_BASE_W", "0x{0:08X}".format(eeprom_base_w))
+        add_data(entry, "PIC_USER_ID_BASE_W", "0x{0:08X}".format(user_id_info['address']//2))
+        add_data(entry, "PIC_CONFIG_BASE_W", "0x{0:08X}".format(config_word_info['address']//2))
+        add_data(entry, "PIC_FLASH_SIZE_W", "0x{0:08X}".format((flash_info['size']+1)//2))
+        add_data(entry, "PIC_EEPROM_SIZE_B", "0x{0:04X}".format(eeprom_size_b))
+        add_data(entry, "PIC_USER_ID_SIZE_W", "{}".format((user_id_info['size']+1)//2))
+        add_data(entry, "PIC_CONFIG_SIZE_W", "{}".format((config_word_info['size']+1)//2))
+        add_data(entry, "PIC_FLASH_WRITE_BLOCK_B", "{}".format(flash_info['page_size']))
+        add_data(entry, "PIC_EEPROM_WRITE_BLOCK_B", "{}".format(eeprom_write_block_b))
+        add_data(entry, "PIC_USER_ID_WRITE_BLOCK_B", "{}".format(user_id_info['write_size']))
+        add_data(entry, "PIC_CONFIG_WRITE_BLOCK_B", "{}".format(config_word_info['write_size']))
+        add_data(entry, "PIC_DEVICE_ID", "0x{0:04X}".format(device_info['device_id']))
+        add_comment(entry, "TODO this value must be manually checked/updated")
+        add_comment(entry, "Mask for config bytes. Bit n: 0->allow config byte offset n write, 1->block config byte offset n write.")
         # Default generated mask allows writing all config words
         default_config_word_mask = ((0xFFFFFFFE << (config_word_info['size']-1)) & 0xFFFFFFFF)
-        entry.append(self._add_data("PIC_CONFIG_PROTECTION_MASK", "0x{0:08X}".format(default_config_word_mask)))
+        add_data(entry, "PIC_CONFIG_PROTECTION_MASK", "0x{0:08X}".format(default_config_word_mask))
         return entry
 
     def get_xml_string(self):
@@ -282,7 +312,7 @@ class ConfigGenerator(object):
         deviceconfig = self.populate_device_config_template()
 
         # Add the blob-holder node
-        blob = self._add_register("BLOB", "")
+        blob = make_register("BLOB", "")
 
         # Fetch the generated primitive blob
         scripted_content = self.get_xml_element()

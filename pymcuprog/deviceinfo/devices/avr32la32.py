@@ -1,8 +1,14 @@
+
+"""
+Required device info for the avr32la32 devices
+The following data was collected from device pack Microchip.AVR-Lx_DFP 1.0.4
+"""
+
 from pymcuprog.deviceinfo.eraseflags import ChiperaseEffect
 
 DEVICE_INFO = {
     'interface': 'UPDI',
-    'name': 'avr16eb14',
+    'name': 'avr32la32',
     'architecture': 'avr8x',
 
     # eeprom
@@ -15,8 +21,8 @@ DEVICE_INFO = {
     'eeprom_isolated_erase': True,
 
     # flash
-    'flash_address_byte': 0x00800000,
-    'flash_size_bytes': 0x4000,
+    'flash_address_byte': 0x800000,
+    'flash_size_bytes': 0x8000,
     'flash_page_size_bytes': 0x40,
     'flash_read_size_bytes': 0x02,
     'flash_write_size_bytes': 0x40,
@@ -52,7 +58,7 @@ DEVICE_INFO = {
 
     # signatures
     'signatures_address_byte': 0x1080,
-    'signatures_size_bytes': 0x40,
+    'signatures_size_bytes': 0x80,
     'signatures_page_size_bytes': 0x01,
     'signatures_read_size_bytes': 0x01,
     'signatures_write_size_bytes': 0x00,
@@ -64,16 +70,16 @@ DEVICE_INFO = {
     'boot_row_size_bytes': 0x40,
     'boot_row_page_size_bytes': 0x40,
     'boot_row_read_size_bytes': 0x01,
-    'boot_row_write_size_bytes': 0x01,
+    'boot_row_write_size_bytes': 0x40,
     'boot_row_chiperase_effect': ChiperaseEffect.CONDITIONALLY_ERASED_AVR,
-    'boot_row_isolated_erase': True,    
+    'boot_row_isolated_erase': True,
 
     # user_row
     'user_row_address_byte': 0x1200,
     'user_row_size_bytes': 0x40,
     'user_row_page_size_bytes': 0x40,
     'user_row_read_size_bytes': 0x01,
-    'user_row_write_size_bytes': 0x01,
+    'user_row_write_size_bytes': 0x40,
     'user_row_chiperase_effect': ChiperaseEffect.NOT_ERASED,
     'user_row_isolated_erase': True,
 
@@ -84,5 +90,5 @@ DEVICE_INFO = {
     'address_size': '24-bit',
     'prog_clock_khz': 1800,
     'hv_implementation': 2,
-    'device_id': 0x1E9449,
+    'device_id': 0x1E9558,
 }

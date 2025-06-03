@@ -8,18 +8,27 @@ from __future__ import print_function
 
 import collections
 import argparse
-from os import read
 import textwrap
+import ast
 from xml.etree import ElementTree
-from pymcuprog.deviceinfo import deviceinfokeys
+from xml.dom import minidom
+from datetime import datetime
 
 from pymcuprog.deviceinfo.memorynames import MemoryNames
 from pymcuprog.deviceinfo.deviceinfokeys import DeviceMemoryInfoKeys, DeviceInfoKeysAvr
+from pymcuprog.deviceinfo.configgenerator import add_register, make_register, add_data, add_comment
 
 # High voltage implementations as defined on https://confluence.microchip.com/x/XVxcE
 HV_IMPLEMENTATION_SHARED_UPDI = "0"
 HV_IMPLEMENTATION_DEDICATED_UPDI = "1"
 HV_IMPLEMENTATION_SEPARATE_PIN = "2"
+HV_IMPLEMENTATION_UPDI_HANDSHAKE = "3"
+
+# NVM variants using Paged writes, i.e. page buffer
+# Note that these variants are the NVMCTRL variants in the atdf files and not the NVM variants given in the SIB
+# nvm_ctrl_avr_v2: SIB variant P:0 - tiny0, 1, 2, mega0
+# nvm_ctrl_avr_v3: SIB variant P:3 - EA and P:5 - EB
+NVM_VARIANTS_PAGED = ['nvm_ctrl_avr_v2', 'nvm_ctrl_avr_v3']
 
 def map_atdf_memory_name_to_pymcuprog_name(atdf_name):
     """
@@ -57,11 +66,11 @@ def determine_chiperase_effect(memoryname, architecture):
     Determine if memory is erased by a chip erase
 
     :param memoryname: Name of memory as defined in pymcuprog.deviceinfo.memorynames
-    :type memoryname: str
+    :type memoryname: string
     :param architecture: Architecture as defined in atdf file
-    :type architecture: str
+    :type architecture: string
     :return: Chip erase effect
-    :rtype: str
+    :rtype: string
     """
     if 'avr' in architecture:
         if memoryname in [MemoryNames.USER_ROW, MemoryNames.FUSES, MemoryNames.SIGNATURES, MemoryNames.INTERNAL_SRAM]:
@@ -78,11 +87,11 @@ def determine_isolated_erase(memoryname, architecture):
     Determine if memory can be erased without side effects
 
     :param memoryname: Name of memory as defined in pymcuprog.deviceinfo.memorynames
-    :type memoryname: str
+    :type memoryname: string
     :param architecture: Architecture as defined in atdf file
-    :type architecture: str
+    :type architecture: string
     :return: 'True' if memory can be erased in isolation, 'False' if not.
-    :rtype: str
+    :rtype: string
     """
     if 'avr' in architecture:
         if 'avr8x' in architecture and memoryname in [MemoryNames.FLASH]:
@@ -95,24 +104,26 @@ def determine_isolated_erase(memoryname, architecture):
 
     return '# To be filled in manually'
 
-def determine_write_size(memoryname, pagesize, devicename):
+def determine_write_size(memoryname, pagesize, devicename, nvm_variant):
     """
     Determine write granularity for memory
 
     :param memoryname: Name of memory as defined in pymcuprog.deviceinfo.memorynames
-    :type memoryname: str
+    :type memoryname: string
     :param pagesize: Page size of memory
-    :type pagesize: str or int
+    :type pagesize: string or int
+    :param nvm_variant: Which NVM variant is used in the device
+    :type nvm_variant: string
     :return: Write granularity as string
-    :rtype: str
+    :rtype: string
     """
     write_size = "0x01"
     devicename = devicename.lower()
     if memoryname == 'flash':
-        if (devicename.find('avr') != -1 and ((devicename.find('da') != -1) or (devicename.find('db') != -1))):
-            write_size = "0x02"
-        else:
+        if nvm_variant in NVM_VARIANTS_PAGED:
             write_size = pagesize
+        else:
+            write_size = "0x02"
     if memoryname == "user_row":
         if devicename.find('avr') != -1 and devicename.find('ea') != -1:
             # For AVR EA user row the complete page must be written
@@ -126,9 +137,9 @@ def determine_read_size(memoryname):
     Determine read granularity for memory
 
     :param memoryname: Name of memory as defined in pymcuprog.deviceinfo.memorynames
-    :type memoryname: str
+    :type memoryname: string
     :return: Read granularity as string
-    :rtype: str
+    :rtype: string
     """
     # Read size is always 1 byte except for flash that can only read complete words
     readsize = "0x01"
@@ -142,7 +153,7 @@ def capture_memory_segment_attributes(attributes, memories):
     Capture memory attributes for memory segment
 
     :param attributes: Memory attributes to capture (from atdf)
-    :type attributes: xml.etree.ElementTree.Element instance
+    :type attributes: class:`xml.etree.ElementTree.Element`
     :param memories: Dictionary with memory information. Captured data will be added to this dict.
     :type memories: dict
     """
@@ -158,9 +169,9 @@ def capture_memory_segment_attributes(attributes, memories):
     # lockbits are always byte accessible.
     if name in ['fuses', 'lockbits']:
         pagesize = '0x01'
-    output = ""
+
     # These names are the names used in the atdf files and might differ from the pymcuprog MemoryNames
-    if name in ['progmem', 'eeprom', 'user_signatures', 'fuses', 'lockbits', 'signatures', 'internal_sram']:
+    if map_atdf_memory_name_to_pymcuprog_name(name) != 'unknown':
         print_name = map_atdf_memory_name_to_pymcuprog_name(name)
         if not print_name in memories:
             memories[print_name] = {}
@@ -173,13 +184,13 @@ def capture_register_offset(name, offset):
     Wrapper to create a string definition
 
     :param name: register name
-    :type name: str
+    :type name: string
     :param offset: register offset
-    :type offset: str
+    :type offset: string
     :return: string of register and offset
-    :rtype: str
+    :rtype: string
     """
-    return capture_field("{}_base".format(name.lower()), offset)
+    return capture_field(f"{name.lower()}_base", offset)
 
 
 def capture_field(field, value):
@@ -187,27 +198,27 @@ def capture_field(field, value):
     Macro to create text format field
 
     :param field: register name
-    :type field: str
+    :type field: string
     :param value: register value
-    :type value: str
+    :type value: string
     :return: string of definition
-    :rtype: str
+    :rtype: string
     """
     try:
         _test_value = int(value, 16)
     except (ValueError, AttributeError):
         # Can't convert string to int, assumed to be string
-        return "    '{}': '{}',\n".format(field, value)
-    return "    '{}': {},\n".format(field, value)
+        return f"    '{field}': '{value}',\n"
+    return F"    '{field}': {value},\n"
 
 def capture_device_data_from_device_element(element):
     """
     Capture device data from a device element
 
     :param element: element with tag='device'
-    :type element: xml.etree.ElementTree.Element instance
+    :type element: class`xml.etree.ElementTree.Element`
     :return: captured data from the device element as a string
-    :rtype: str
+    :rtype: string
     """
     architecture = element.attrib['architecture'].lower()
     output = capture_field('name', element.attrib['name'].lower())
@@ -219,9 +230,9 @@ def capture_memory_segments_from_device_element(element, memories):
     Capture memory segment data from a device element
 
     :param element: element with tag='device'
-    :type element: xml.etree.ElementTree.Element instance
+    :type element: class:`xml.etree.ElementTree.Element instance`
     :return: captured data from the device element as a string
-    :rtype: str
+    :rtype: string
     """
     output = ""
     for i in element.iterfind("address-spaces/address-space/memory-segment"):
@@ -235,7 +246,7 @@ def capture_module_element(element):
     This function will return data captured from the module element but will also check if the module
     element contains info about an UPDI fuse (fuse to configure a shared UPDI pin)
     :param element: element with tag='module'
-    :type element: xml.etree.ElementTree.Element instance
+    :type element: class:`xml.etree.ElementTree.Element`
     :return: tuple of
     * output - captured module element data as a string
     * found_updi_fuse - True if the module element contained info about an UPDI fuse
@@ -245,10 +256,10 @@ def capture_module_element(element):
     found_updi_fuse = False
     for i in element.iterfind("instance/register-group"):
         name = i.attrib['name']
-        offset = "0x{:08X}".format(int(i.attrib['offset'], 16))
+        offset = f"0x{int(i.attrib['offset'], 16):08X}"
         if i.attrib['name'] == 'SYSCFG':
             output += capture_register_offset(name, offset)
-            output += capture_register_offset('OCD', "0x{:08X}".format(int(offset, 16) + 0x80))
+            output += capture_register_offset('OCD', f"0x{int(offset, 16) + 0x80:08X}")
         if i.attrib['name'] == 'NVMCTRL':
             output += capture_register_offset(name, offset)
     for i in element.iterfind("instance/signals/signal"):
@@ -262,12 +273,11 @@ def capture_memory_module_element(element, memories):
     Capture memory information from a memory module element
 
     :param element: Element with tag='module'
-    :type element: xml.etree.ElementTree.Element instance
+    :type element: class:`xml.etree.ElementTree.Element`
     :param memories: Dictionary with memory information. Captured memory information will be added to this
         dictionary
     :type memories: dict
     """
-    output = ""
     memoryname = map_atdf_memory_name_to_pymcuprog_name(element.attrib['name'])
     if not memoryname in memories:
         # Discovered new memory, add it to the dictionary
@@ -287,10 +297,20 @@ def capture_memory_module_element(element, memories):
         # Size is found in the module register group
         if 'size' in rg.attrib:
             memories[memoryname][DeviceMemoryInfoKeys.SIZE] = rg.attrib['size']
-            if element.attrib['name'].lower() in ['userrow']:
+            if memoryname in [MemoryNames.USER_ROW]:
                 # For user row set the page size equal to the size since this makes most sense when printing memory
                 # content and when erasing, even though the write granularity is one byte
                 memories[memoryname][DeviceMemoryInfoKeys.PAGE_SIZE] = rg.attrib['size']
+            elif memoryname in [MemoryNames.FUSES]:
+                # For fuses there might be some fuse registers with size bigger than one.
+                # The register-group size only counts number of registers so each register size must be checked to find
+                # total size in bytes
+                for reg in rg:
+                    regsize = int(reg.attrib['size'], 0)
+                    print(f"REGSIZE: {regsize}")
+                    if regsize > 1:
+                        memories[memoryname][DeviceMemoryInfoKeys.SIZE] = f"0x{int(memories[memoryname][DeviceMemoryInfoKeys.SIZE], 0) + (regsize - 1):X}"
+
         else:
             memories[memoryname][DeviceMemoryInfoKeys.SIZE] = "UNKNOWN"
 
@@ -299,7 +319,7 @@ def capture_signature_from_property_groups_element(element):
     Capture signature (Device ID) data from a property-group element
 
     :param element: element with tag='property-groups'
-    :type element: xml.etree.ElementTree.Element instance
+    :type element: class:`xml.etree.ElementTree.Element instance`
     :return: bytearray with 3 bytes of Device ID data
     :rtype: bytearray
     """
@@ -313,14 +333,23 @@ def capture_signature_from_property_groups_element(element):
             signature[2] = int(i.attrib['value'], 16)
     return signature
 
+def capture_nvm_version_from_nvmctrl_module(element):
+    """Capture NVM controller variant from module element
+
+    :param element: element with tag='module'
+    :type element: class:`xml.etree.ElementTree.Element instance`
+    """
+
+    return element.attrib['id'].lower()
+
 def get_flash_offset(element):
     """
     Fetch flash memory offset from element
 
     :param element: Element with tag='property-groups'
-    :type element: xml.etree.ElementTree.Element instance
+    :type element: class:`xml.etree.ElementTree.Element instance`
     :return: Flash offset as string
-    :rtype: str
+    :rtype: string
     """
     flash_offset = "0x00000000"
     for i in element.iterfind("property-group/property"):
@@ -333,9 +362,9 @@ def get_hv_implementation(element):
     Fetch High Voltage implementation from element
 
     :param element: Element with tag='property-groups'
-    :type element: xml.etree.ElementTree.Element instance
+    :type element: class:`xml.etree.ElementTree.Element instance`
     :return: High Voltage implementation as string (defined on https://confluence.microchip.com/x/XVxcE)
-    :rtype: str
+    :rtype: string
     """
     hv_implementation = None
     for i in element.iterfind("property-group/property"):
@@ -349,9 +378,9 @@ def determine_address_size(flash_offset):
     Determine number of address bits needed for Flash
 
     :param flash_offset: Flash offset from atdf
-    :type flash_offset: str
+    :type flash_offset: string
     :return: Address size ('16-bit' or '24-bit')
-    :rtype: str
+    :rtype: string
     """
     address_size = '16-bit'
     if flash_offset is not None:
@@ -364,15 +393,16 @@ def harvest_from_file(filename):
     """
     Harvest parameters from a file
 
-    :param filename: path to file to parse
-    :type filename: str
-    :return: list of parameters
-    :rtype: str
+    :param filename: Path to file to parse
+    :type filename: string
+    :return: deviceinfo, device_config
+    :rtype: string, string
     """
     xml_iter = ElementTree.iterparse(filename)
-    output = ""
+    deviceinfo = ""
     device_fields = ""
-    extra_fields = "\n    # Some extra AVR specific fields\n"
+    extra_fields_comment = "# Some extra AVR specific fields"
+    extra_fields = f"\n    {extra_fields_comment}\n"
 
     shared_updi = False
     progmem_offset = None
@@ -393,6 +423,8 @@ def harvest_from_file(filename):
                 # and lockbits.
                 if elem.attrib['name'].lower() in ['sigrow', 'fuse', 'lock', 'userrow']:
                     capture_memory_module_element(elem, memories)
+                elif elem.attrib['name'].lower() == 'nvmctrl':
+                    nvm_variant = capture_nvm_version_from_nvmctrl_module(elem)
                 module, found_updi_fuse = capture_module_element(elem)
                 extra_fields += module
                 if found_updi_fuse:
@@ -423,36 +455,192 @@ def harvest_from_file(filename):
 
 
     extra_fields += capture_field(DeviceInfoKeysAvr.DEVICE_ID,
-                            "0x{:02X}{:02X}{:02X}".format(signature[0], signature[1], signature[2]))
+                            f"0x{signature[0]:02X}{signature[1]:02X}{signature[2]:02X}")
 
     # Replace "flash start" with "progmem_offset"
     if progmem_offset and int(progmem_offset, 16) > 0:
         memories[MemoryNames.FLASH][DeviceMemoryInfoKeys.ADDRESS] = progmem_offset
 
-    # Build the output
-    output += device_fields
+    # Build the deviceinfo
+    deviceinfo += device_fields
     sorted_memories = collections.OrderedDict(sorted(memories.items()))
     for memory in sorted_memories:
-        output += "\n    # {}\n".format(memory)
-        output += capture_field('{}_{}_byte'.format(memory, DeviceMemoryInfoKeys.ADDRESS),
+        deviceinfo += f"\n    # {memory}\n"
+        deviceinfo += capture_field(f"{memory}_{DeviceMemoryInfoKeys.ADDRESS}_byte",
                                 sorted_memories[memory][DeviceMemoryInfoKeys.ADDRESS])
-        output += capture_field('{}_{}_bytes'.format(memory, DeviceMemoryInfoKeys.SIZE),
+        deviceinfo += capture_field(f"{memory}_{DeviceMemoryInfoKeys.SIZE}_bytes",
                                 sorted_memories[memory][DeviceMemoryInfoKeys.SIZE])
-        output += capture_field('{}_{}_bytes'.format(memory, DeviceMemoryInfoKeys.PAGE_SIZE),
+        deviceinfo += capture_field(f"{memory}_{DeviceMemoryInfoKeys.PAGE_SIZE}_bytes",
                                 sorted_memories[memory][DeviceMemoryInfoKeys.PAGE_SIZE])
-        output += "    '{}_{}_bytes': {},\n".format(memory,
-                                                    DeviceMemoryInfoKeys.READ_SIZE,
-                                                    determine_read_size(memory))
-        output += "    '{}_{}_bytes': {},\n".format(memory,
-                                                    DeviceMemoryInfoKeys.WRITE_SIZE,
-                                                    determine_write_size(memory,
-                                                                         sorted_memories[memory][DeviceMemoryInfoKeys.PAGE_SIZE],
-                                                                         devicename))
-        output += "    '{}_{}': {},\n".format(memory, DeviceMemoryInfoKeys.CHIPERASE_EFFECT, determine_chiperase_effect(memory, architecture))
-        output += "    '{}_{}': {},\n".format(memory, DeviceMemoryInfoKeys.ISOLATED_ERASE, determine_isolated_erase(memory, architecture))
+        deviceinfo += f"    '{memory}_{DeviceMemoryInfoKeys.READ_SIZE}_bytes': {determine_read_size(memory)},\n"
+        writesize = determine_write_size(memory, sorted_memories[memory][DeviceMemoryInfoKeys.PAGE_SIZE], devicename, nvm_variant)
+        deviceinfo += f"    '{memory}_{DeviceMemoryInfoKeys.WRITE_SIZE}_bytes': {writesize},\n"
+        deviceinfo += f"    '{memory}_{DeviceMemoryInfoKeys.CHIPERASE_EFFECT}': {determine_chiperase_effect(memory, architecture)},\n"
+        deviceinfo += f"    '{memory}_{DeviceMemoryInfoKeys.ISOLATED_ERASE}': {determine_isolated_erase(memory, architecture)},\n"
 
-    output += extra_fields
-    return output
+    deviceinfo += extra_fields
+
+    # Generate dictionary with the extra info from the harvested device info
+    extrainfo_string = deviceinfo.split(f"{extra_fields_comment}\n")[1]
+    extrainfo_string = f"{{\n{extrainfo_string}}}"
+
+    extrainfo = ast.literal_eval(extrainfo_string)
+
+
+    config = generate_config_xml(devicename, extrainfo, memories)
+
+    return deviceinfo, config
+
+def generate_config_xml(devicename, extrainfo, memories):
+    """Build device-config xml file content
+
+    :return: Device config XML content as string
+    :rtype: string
+    """
+
+    config = ''
+
+    # Construct the root
+    deviceconf = ElementTree.Element("deviceconf")
+    deviceconf.attrib["name"] = devicename.upper()
+    now = datetime.now().strftime("%Y.%m.%d, %H:%M:%S")
+    comment = ElementTree.Comment(f"device config for {devicename} generated {now}")
+    deviceconf.append(comment)
+
+    # Construct basic version info:
+    # These values are hardcoded, and thus need to be updated when the spec updates :/
+    # It would be nice to fetch them from somewhere...
+    add_register(deviceconf, "DEVICE_CONFIG_MAJOR", "1")
+    add_register(deviceconf, "DEVICE_CONFIG_MINOR", "10")
+    add_register(deviceconf, "DEVICE_CONFIG_BUILD", "4")
+    # Not used yet:
+    add_register(deviceconf, "CONTENT_LENGTH", "0")
+    add_register(deviceconf, "CONTENT_CHECKSUM", "0")
+    # Default to start at 0
+    add_register(deviceconf, "INSTANCE", "0")
+    # UPDI_TINYX_API
+    add_register(deviceconf, "INTERFACE_TYPE", "0x01")
+    # Not used for AVR
+    add_register(deviceconf, "DEVICE_VARIANT", "0x00")
+
+    # Create blob-holder node
+    blob = make_register("BLOB", "")
+
+    xml_blob = ElementTree.Element("blob")
+
+    # Add LIST token: <token>LIST</token>
+    token = ElementTree.Element("token")
+    token.text = "LIST"
+    xml_blob.append(token)
+
+    # Add device info only as there is no script content for AVR devicess
+
+    # Create new entry
+    entry = ElementTree.Element("entry")
+
+    # Add type
+    d_type = ElementTree.Element("type")
+    d_type.text = "D_TINYX"
+    entry.append(d_type)
+
+    # Add fields
+    todo_comment = " TODO value(s) must be checked/updated manually "
+
+    add_data(entry, "DEVICE_ID", f"0x{extrainfo['device_id'] & 0xFFFF:04X}")
+
+    add_comment(entry, "Flash information ")
+    add_data(entry, "PROG_BASE", f"0x{int(memories[MemoryNames.FLASH][DeviceMemoryInfoKeys.ADDRESS], 0) & 0xFFFF:04X}")
+    add_data(entry, "PROG_BASE_MSB", f"0x{(int(memories[MemoryNames.FLASH][DeviceMemoryInfoKeys.ADDRESS], 0) >> 16) & 0xFF:02X}")
+    add_data(entry, "FLASH_BYTES", f"0x{int(memories[MemoryNames.FLASH][DeviceMemoryInfoKeys.SIZE], 0) & 0xFFFFFFFF:08X}")
+    add_data(entry, "FLASH_PAGE_BYTES", f"0x{int(memories[MemoryNames.FLASH][DeviceMemoryInfoKeys.PAGE_SIZE], 0) & 0xFF:02X}")
+    add_data(entry, "FLASH_PAGE_BYTES_MSB", f"0x{(int(memories[MemoryNames.FLASH][DeviceMemoryInfoKeys.PAGE_SIZE], 0) >> 8) & 0xFF:02X}")
+
+    add_comment(entry, " EEPROM information ")
+    add_data(entry, "EEPROM_BASE", f"0x{int(memories[MemoryNames.EEPROM][DeviceMemoryInfoKeys.ADDRESS], 0) & 0xFFFF:04X}")
+    add_data(entry, "EEPROM_BYTES", f"0x{int(memories[MemoryNames.EEPROM][DeviceMemoryInfoKeys.SIZE], 0) & 0xFFFF:04X}")
+    add_data(entry, "EEPROM_PAGE_BYTES", f"0x{int(memories[MemoryNames.EEPROM][DeviceMemoryInfoKeys.PAGE_SIZE], 0) & 0xFF:02X}")
+
+    add_comment(entry, " User row information ")
+    add_data(entry, "USER_ROW_BASE", f"0x{int(memories[MemoryNames.USER_ROW][DeviceMemoryInfoKeys.ADDRESS], 0) & 0xFFFF:04X}")
+    add_data(entry, "USER_SIG_BYTES", f"0x{int(memories[MemoryNames.USER_ROW][DeviceMemoryInfoKeys.SIZE], 0) & 0xFFFF:04X}")
+
+    add_comment(entry, " Signature row information ")
+    add_data(entry, "SIGROW_BASE", f"0x{int(memories[MemoryNames.SIGNATURES][DeviceMemoryInfoKeys.ADDRESS], 0) & 0xFFFF:04X}")
+
+    add_comment(entry, " FUSE/LOCK information ")
+    add_data(entry, "FUSE_BASE", f"0x{int(memories[MemoryNames.FUSES][DeviceMemoryInfoKeys.ADDRESS], 0) & 0xFFFF:04X}")
+    add_data(entry, "FUSE_BYTES", f"0x{int(memories[MemoryNames.FUSES][DeviceMemoryInfoKeys.SIZE], 0) & 0xFFFF:04X}")
+    add_data(entry, "LOCK_BASE", f"0x{int(memories[MemoryNames.LOCKBITS][DeviceMemoryInfoKeys.ADDRESS], 0) & 0xFFFF:04X}")
+
+    if MemoryNames.BOOT_ROW in memories:
+        comment = " Boot row information "
+        boot_base = f"0x{int(memories[MemoryNames.BOOT_ROW][DeviceMemoryInfoKeys.ADDRESS], 0) & 0xFFFF:04X}"
+        boot_bytes = f"0x{int(memories[MemoryNames.BOOT_ROW][DeviceMemoryInfoKeys.SIZE], 0) & 0xFFFF:04X}"
+    else:
+        comment = " No Boot row on this device "
+        boot_base = 0x0000
+        boot_bytes = 0x0000
+    add_comment(entry, comment)
+    add_data(entry, "BOOT_ROW_BASE", f"{boot_base}")
+    add_data(entry, "BOOT_ROW_BYTES", f"{boot_bytes}")
+
+    add_comment(entry, " Additional UPDI parameters ")
+    if extrainfo['address_size'] == '16-bit':
+        comment = " This is a 16-bit UPDI variant "
+        adr_size = 0x00
+    else:
+        comment = " This is a 24-bit UPDI variant "
+        adr_size = 0x01
+    add_comment(entry, comment)
+    add_data(entry, "ADDRESS_SIZE", f"0x{adr_size:02X}")
+
+    add_comment(entry, " PROG/DEBUG information ")
+    add_data(entry, "NVMCTRL_MODULE", f"0x{extrainfo['nvmctrl_base'] & 0xFFFF:04X}")
+    add_data(entry, "OCD_MODULE", f"0x{extrainfo['ocd_base'] & 0xFFFF:04X}")
+    add_comment(entry, " 0: HV on the same pin as UPDI; 1: No HV; 2: HV on separate (/RESET) pin to UPDI ")
+    add_data(entry, "HV_IMPLEMENTATION", f"{extrainfo['hv_implementation']}")
+
+    add_comment(entry, " UPDI speed limits ")
+    add_comment(entry, todo_comment)
+    add_comment(entry, " mV ")
+    add_data(entry, "PDICLK_DIV1_VMIN", "4500")
+    add_comment(entry, " mV ")
+    add_data(entry, "PDICLK_DIV2_VMIN", "2700")
+    add_comment(entry, " mV ")
+    add_data(entry, "PDICLK_DIV4_VMIN", "2200")
+    add_comment(entry, " mV ")
+    add_data(entry, "PDICLK_DIV8_VMIN", "1500")
+    add_comment(entry, " kB ")
+    add_data(entry, "PDI_PAD_FMAX", "1500")
+
+    add_comment(entry, " Fuse protection parameters (force certain fuses high or low) ")
+    add_comment(entry, todo_comment)
+    add_comment(entry, " Offset of the fuse protecting UPDI pin (SYSCFG0 or PINCFG0) within FUSE space ")
+    add_data(entry, "PINPROT_OFFSET", "5")
+    add_comment(entry, " AND mask to apply to PINPROT when writing. ")
+    add_data(entry, "PINPROT_WRITE_MASK_AND", "0xFF")
+    add_comment(entry, " OR mask to apply to PINPROT when writing. ")
+    add_data(entry, "PINPROT_WRITE_MASK_OR", "0x00")
+    add_comment(entry, " AND mask to apply to PINPROT after erase. ")
+    add_data(entry, "PINPROT_ERASE_MASK_AND", "0xFF")
+    add_comment(entry, " OR mask to apply to PINPROT after erase. ")
+    add_data(entry, "PINPROT_ERASE_MASK_OR", "0x00")
+    add_comment(entry, " Mask for writing to fuse address space. Bit n applies to byte offset n. ")
+    add_comment(entry, " Set bit to 0 to allow access to write; set bit to 1 to prevent writing to this fuse. ")
+    add_data(entry, "FUSE_PROTECTION_MASK", "0x0000")
+
+    xml_blob.append(entry)
+
+    # Put the result into the blob-holder
+    blob.append(xml_blob)
+
+    # Add the blob-holder to the main node
+    deviceconf.append(blob)
+
+    config = minidom.parseString(ElementTree.tostring(deviceconf,
+                                             encoding='unicode')).toprettyxml(indent="    ")
+
+    return config
 
 def main():
     """
@@ -472,10 +660,14 @@ def main():
 
     arguments = parser.parse_args()
 
-    dict_content = harvest_from_file(arguments.filename)
+    dict_content, device_config = harvest_from_file(arguments.filename)
     content = "\nfrom pymcuprog.deviceinfo.eraseflags import ChiperaseEffect\n\n"
-    content += "DEVICE_INFO = {{\n{}}}".format(dict_content)
+    content += f"DEVICE_INFO = {{\n{dict_content}}}"
+    print("Device info for pymcuprog:")
     print(content)
+    print()
+    print("Device config XML content for pydebuggerconfig:\n")
+    print(device_config)
 
 if __name__ == "__main__":
     main()

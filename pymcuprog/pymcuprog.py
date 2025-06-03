@@ -221,7 +221,7 @@ def main():
                         help="memory byte offset to access")
 
     parser.add_argument("-b", "--bytes",
-                        type=int,
+                        type=lambda x: int(x, 0),
                         default=0,
                         help="number of bytes to access")
 

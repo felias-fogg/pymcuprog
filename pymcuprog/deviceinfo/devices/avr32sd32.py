@@ -1,25 +1,30 @@
+
+"""
+Required device info for the avr32sd32 devices
+"""
+
 from pymcuprog.deviceinfo.eraseflags import ChiperaseEffect
 
 DEVICE_INFO = {
     'interface': 'UPDI',
-    'name': 'avr16eb14',
+    'name': 'avr32sd32',
     'architecture': 'avr8x',
 
     # eeprom
     'eeprom_address_byte': 0x1400,
-    'eeprom_size_bytes': 0x200,
-    'eeprom_page_size_bytes': 0x8,
+    'eeprom_size_bytes': 0x100,
+    'eeprom_page_size_bytes': 0x1,
     'eeprom_read_size_bytes': 0x01,
     'eeprom_write_size_bytes': 0x01,
     'eeprom_chiperase_effect': ChiperaseEffect.CONDITIONALLY_ERASED_AVR,
     'eeprom_isolated_erase': True,
 
     # flash
-    'flash_address_byte': 0x00800000,
-    'flash_size_bytes': 0x4000,
-    'flash_page_size_bytes': 0x40,
+    'flash_address_byte': 0x800000,
+    'flash_size_bytes': 0x8000,
+    'flash_page_size_bytes': 0x200,
     'flash_read_size_bytes': 0x02,
-    'flash_write_size_bytes': 0x40,
+    'flash_write_size_bytes': 0x200,
     'flash_chiperase_effect': ChiperaseEffect.ALWAYS_ERASED,
     'flash_isolated_erase': True,
 
@@ -33,8 +38,8 @@ DEVICE_INFO = {
     'fuses_isolated_erase': False,
 
     # internal_sram
-    'internal_sram_address_byte': 0x7800,
-    'internal_sram_size_bytes': 0x800,
+    'internal_sram_address_byte': 0x7000,
+    'internal_sram_size_bytes': 0x1000,
     'internal_sram_page_size_bytes': 0x01,
     'internal_sram_read_size_bytes': 0x01,
     'internal_sram_write_size_bytes': 0x01,
@@ -52,7 +57,7 @@ DEVICE_INFO = {
 
     # signatures
     'signatures_address_byte': 0x1080,
-    'signatures_size_bytes': 0x40,
+    'signatures_size_bytes': 0x80,
     'signatures_page_size_bytes': 0x01,
     'signatures_read_size_bytes': 0x01,
     'signatures_write_size_bytes': 0x00,
@@ -61,17 +66,17 @@ DEVICE_INFO = {
 
     # boot_row
     'boot_row_address_byte': 0x1100,
-    'boot_row_size_bytes': 0x40,
-    'boot_row_page_size_bytes': 0x40,
+    'boot_row_size_bytes': 0x100,
+    'boot_row_page_size_bytes': 0x100,
     'boot_row_read_size_bytes': 0x01,
     'boot_row_write_size_bytes': 0x01,
     'boot_row_chiperase_effect': ChiperaseEffect.CONDITIONALLY_ERASED_AVR,
-    'boot_row_isolated_erase': True,    
+    'boot_row_isolated_erase': True,
 
     # user_row
     'user_row_address_byte': 0x1200,
-    'user_row_size_bytes': 0x40,
-    'user_row_page_size_bytes': 0x40,
+    'user_row_size_bytes': 0x200,
+    'user_row_page_size_bytes': 0x200,
     'user_row_read_size_bytes': 0x01,
     'user_row_write_size_bytes': 0x01,
     'user_row_chiperase_effect': ChiperaseEffect.NOT_ERASED,
@@ -83,6 +88,6 @@ DEVICE_INFO = {
     'ocd_base': 0x00000F80,
     'address_size': '24-bit',
     'prog_clock_khz': 1800,
-    'hv_implementation': 2,
-    'device_id': 0x1E9449,
+    'hv_implementation': 3,
+    'device_id': 0x1E9552,
 }

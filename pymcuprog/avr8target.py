@@ -148,9 +148,6 @@ class AvrDevice(object):
         # AVR8 protocol packet framer limit
         if read_chunk_size > self.max_read_chunk_size:
             read_chunk_size = self.max_read_chunk_size
-        # Check alignment
-        if bytes_to_read != read_chunk_size and start_address % read_chunk_size != 0:
-            raise PymcuprogError("Misaligned read")
         data = bytearray()
         while bytes_to_read:
             if bytes_to_read < read_chunk_size:
